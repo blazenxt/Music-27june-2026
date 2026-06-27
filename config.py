@@ -7,21 +7,14 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-# ── Telegram ─────────────────────────────────────────────────────────────────
+# ── Telegram ──────────────────────────────────────────────────────────────────
 API_ID         = int(os.environ["API_ID"])
 API_HASH       = os.environ["API_HASH"]
 BOT_TOKEN      = os.environ["BOT_TOKEN"]
 SESSION_STRING = os.environ["SESSION_STRING"]
 
-# ── Spotify (Required for Spotify radio/play) ────────────────────────────────
-# Get from: https://developer.spotify.com/dashboard
-SPOTIFY_CLIENT_ID     = os.getenv("SPOTIFY_CLIENT_ID", "")
-SPOTIFY_CLIENT_SECRET = os.getenv("SPOTIFY_CLIENT_SECRET", "")
-
-# ── YouTube Cookies (IMPORTANT — bypass bot detection & age restriction) ─────
-# Export cookies from your browser using the "Get cookies.txt LOCALLY" extension
-# Place the file at: cookies/youtube.txt
-# Supported formats: Netscape cookies.txt (works with yt-dlp directly)
+# ── YouTube Cookies ───────────────────────────────────────────────────────────
+# See cookies/HOW_TO_GET_COOKIES.md
 YT_COOKIES_FILE = os.getenv("YT_COOKIES_FILE", "cookies/youtube.txt")
 
 # ── Behaviour ─────────────────────────────────────────────────────────────────
@@ -36,24 +29,26 @@ VOTESKIP_THRESHOLD = 0.5
 # ── Radio ─────────────────────────────────────────────────────────────────────
 RADIO_AUTO_REFILL    = True
 RADIO_REFILL_AT      = 3
-# Prefer Spotify playlists for radio if credentials are set
 RADIO_PREFER_SPOTIFY = True
-# Public Spotify playlist IDs per genre (curated)
+
+# Spotify curated playlist IDs for each genre (public playlists, no login needed)
 SPOTIFY_GENRE_PLAYLISTS: dict[str, str] = {
-    "lofi":       "0vvXsWCC9xrXsKd4eEHFjV",  # Lo-Fi Beats
-    "hiphop":     "37i9dQZF1DX0XUsuxWHRQd",  # RapCaviar
-    "pop":        "37i9dQZF1DXcBWIGoYBM5M",  # Today's Top Hits
-    "rock":       "37i9dQZF1DWXRqgorJj26U",  # Rock Classics
-    "electronic": "37i9dQZF1DX4dyzvuaRJ0n",  # Mint (electronic)
-    "jazz":       "37i9dQZF1DXbITWG1ZJKYt",  # Jazz Classics
-    "classical":  "37i9dQZF1DWWEJlAGA9gs0",  # Classical Essentials
-    "rnb":        "37i9dQZF1DX4SBhb3fqCJd",  # Are & Be
-    "metal":      "37i9dQZF1DWTcqUzwhNmKv",  # Metal Essentials
-    "country":    "37i9dQZF1DX1lVhptIYRda",  # Hot Country
-    "kpop":       "37i9dQZF1DX9tPFAsjUPMK",  # K-Pop Daebak
-    "anime":      "37i9dQZF1DWT8aqnwgRt92",  # Anime Hits
-    "workout":    "37i9dQZF1DX76Wlfdnj7AP",  # Beast Mode
-    "sleep":      "37i9dQZF1DWZd79rJ6a7lp",  # Sleep
+    "lofi":       "https://open.spotify.com/playlist/0vvXsWCC9xrXsKd4eEHFjV",
+    "hiphop":     "https://open.spotify.com/playlist/37i9dQZF1DX0XUsuxWHRQd",
+    "pop":        "https://open.spotify.com/playlist/37i9dQZF1DXcBWIGoYBM5M",
+    "rock":       "https://open.spotify.com/playlist/37i9dQZF1DWXRqgorJj26U",
+    "electronic": "https://open.spotify.com/playlist/37i9dQZF1DX4dyzvuaRJ0n",
+    "jazz":       "https://open.spotify.com/playlist/37i9dQZF1DXbITWG1ZJKYt",
+    "classical":  "https://open.spotify.com/playlist/37i9dQZF1DWWEJlAGA9gs0",
+    "rnb":        "https://open.spotify.com/playlist/37i9dQZF1DX4SBhb3fqCJd",
+    "metal":      "https://open.spotify.com/playlist/37i9dQZF1DWTcqUzwhNmKv",
+    "country":    "https://open.spotify.com/playlist/37i9dQZF1DX1lVhptIYRda",
+    "kpop":       "https://open.spotify.com/playlist/37i9dQZF1DX9tPFAsjUPMK",
+    "anime":      "https://open.spotify.com/playlist/37i9dQZF1DWT8aqnwgRt92",
+    "workout":    "https://open.spotify.com/playlist/37i9dQZF1DX76Wlfdnj7AP",
+    "sleep":      "https://open.spotify.com/playlist/37i9dQZF1DWZd79rJ6a7lp",
+    "bollywood":  "https://open.spotify.com/playlist/37i9dQZF1DX0XUsuxWHRQd",  # swap with real Bollywood playlist
+    "punjabi":    "https://open.spotify.com/playlist/37i9dQZF1DX0XUsuxWHRQd",  # swap with real Punjabi playlist
 }
 
 # ── Persistence ───────────────────────────────────────────────────────────────
