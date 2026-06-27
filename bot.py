@@ -8,7 +8,7 @@ import logging.handlers
 from pathlib import Path
 
 from pyrogram import Client
-from pytgcalls import PyTgCalls
+from pytgcalls import GroupCallFile as PyTgCalls
 
 import config
 import player as pl
