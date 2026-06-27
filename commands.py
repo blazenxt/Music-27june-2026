@@ -55,37 +55,43 @@ def register(app: Client):
         # Disable radio mode when explicitly playing something
         st.radio_mode = False
 
-        # Spotify playlist / album
+        # Spotify URL — track / playlist / album / artist
         if "spotify.com" in query and SPOTIFY_ENABLED:
-            if "playlist" in query or "album" in query:
-                status = await msg.reply("🎧 Loading Spotify playlist…", quote=True)
-                queries = await asyncio.get_event_loop().run_in_executor(
-                    None, resolve_spotify, query
-                )
-                if not queries:
-                    await status.edit("❌ Could not load Spotify playlist.")
-                    return
-                try:
-                    first = await get_track_info(queries[0])
-                except Exception as e:
-                    await status.edit(f"❌ {e}")
-                    return
-                st.queue.append(first)
-                for q in queries[1 : MAX_QUEUE_SIZE - len(st.queue)]:
-                    st.queue.append({"title": q, "url": None, "duration": 0,
-                                     "thumbnail": "", "webpage_url": "", "_query": q})
-                asyncio.ensure_future(db.save_queue(chat_id, st.queue))
-                if len(st.queue) == 1:
-                    try:
-                        await pl.play_current(chat_id, first=True)
-                        await status.edit(f"▶️ Now playing: **{first['title']}**\n"
-                                          f"📋 Queued {len(queries)} Spotify tracks.")
-                    except NoActiveGroupCall:
-                        st.queue.clear()
-                        await status.edit("❌ No active voice chat. Start one first.")
-                else:
-                    await status.edit(f"📋 Queued **{len(queries)} tracks** from Spotify.")
+            label  = ("playlist" if "playlist" in query else
+                      "album"    if "album"    in query else
+                      "artist top tracks" if "artist" in query else "track")
+            status = await msg.reply(f"🎵 Loading Spotify {label}…", quote=True)
+            loop   = asyncio.get_event_loop()
+            tracks = await loop.run_in_executor(None, resolve_spotify, query)
+            if not tracks:
+                await status.edit("❌ Could not load from Spotify. Check credentials.")
                 return
+            # Resolve first track immediately so playback starts fast
+            try:
+                from helpers import resolve_yt_for_spotify
+                tracks[0] = await resolve_yt_for_spotify(tracks[0])
+            except Exception as e:
+                await status.edit(f"❌ Could not find on YouTube: {e}")
+                return
+            slots = MAX_QUEUE_SIZE - len(st.queue)
+            prev_len = len(st.queue)
+            for t in tracks[:slots]:
+                st.queue.append(t)
+            asyncio.ensure_future(db.save_queue(chat_id, st.queue))
+            if prev_len == 0:
+                try:
+                    await pl.play_current(chat_id, first=True)
+                    artist_str = f" · {tracks[0].get('artist','')}" if tracks[0].get('artist') else ""
+                    await status.edit(
+                        f"▶️ **{tracks[0]['title']}**{artist_str}\n"
+                        f"📋 {len(tracks[:slots])} tracks from Spotify queued."
+                    )
+                except NoActiveGroupCall:
+                    st.queue.clear()
+                    await status.edit("❌ No active voice chat. Start one first.")
+            else:
+                await status.edit(f"📋 Added **{len(tracks[:slots])} Spotify tracks** to queue.")
+            return
 
         # Single track
         if len(st.queue) >= MAX_QUEUE_SIZE:
@@ -133,7 +139,7 @@ def register(app: Client):
         status  = await msg.reply(f"📻 Tuning into **{args}** radio…", quote=True)
 
         try:
-            seed, tracks = await get_radio_tracks(args)
+            genre_label, tracks, source = await get_radio_tracks(args)
         except Exception as e:
             await status.edit(f"❌ Radio failed: {e}")
             return
@@ -141,6 +147,8 @@ def register(app: Client):
         if not tracks:
             await status.edit("❌ Couldn't find any tracks for that genre.")
             return
+
+        source_icon = "🎵 Spotify" if source == "spotify" else "▶️ YouTube"
 
         # Clear current queue, replace with radio tracks
         was_playing = bool(st.queue)
@@ -151,13 +159,18 @@ def register(app: Client):
         asyncio.ensure_future(db.save_queue(chat_id, st.queue))
 
         if was_playing:
-            # Change stream immediately
             await pl.play_current(chat_id)
-            await status.edit(f"📻 Switched to **{args}** radio ({len(tracks)} tracks queued).")
+            await status.edit(
+                f"📻 Switched to **{args.title()} Radio** via {source_icon}\n"
+                f"{len(tracks)} tracks queued."
+            )
         else:
             try:
                 await pl.play_current(chat_id, first=True)
-                await status.edit(f"📻 **{args.title()} Radio** started — {len(tracks)} tracks queued.")
+                await status.edit(
+                    f"📻 **{args.title()} Radio** started via {source_icon}\n"
+                    f"{len(tracks)} tracks queued."
+                )
             except NoActiveGroupCall:
                 st.queue.clear()
                 st.radio_mode = False
