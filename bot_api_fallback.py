@@ -26,6 +26,11 @@ from telethon.errors import (
 from telethon.sessions import StringSession
 
 import config
+import state
+import database as db
+import player as pl
+from helpers import fmt_duration, get_track_info
+from pytgcalls.exceptions import NoActiveGroupCall
 
 log = logging.getLogger("bot_api_fallback")
 API = f"https://api.telegram.org/bot{config.BOT_TOKEN}"
@@ -215,6 +220,171 @@ async def _finish_session(session: aiohttp.ClientSession, chat_id: int, user_id:
     await _cleanup_flow(user_id)
 
 
+async def _is_chat_admin(session: aiohttp.ClientSession, chat_id: int, user_id: int) -> bool:
+    """Best-effort admin check for fallback commands."""
+    if chat_id > 0:  # private chat
+        return _is_owner(user_id)
+    res = await _api(session, "getChatMember", chat_id=chat_id, user_id=user_id)
+    try:
+        status = res["result"]["status"]
+        return status in ("creator", "administrator")
+    except Exception:
+        return False
+
+
+async def _handle_help(session: aiohttp.ClientSession, chat_id: int):
+    await _send(
+        session,
+        chat_id,
+        "🎵 *Music Bot Commands*\n\n"
+        "/play `<song or url>` - play music\n"
+        "/queue - show queue\n"
+        "/np - now playing\n"
+        "/pause - pause\n"
+        "/resume - resume\n"
+        "/skip - skip current track\n"
+        "/stop - stop and clear queue\n"
+        "/loop - toggle loop\n"
+        "/vol `0-200` - set volume\n\n"
+        "Owner: /ownerpanel",
+    )
+
+
+async def _handle_play(session: aiohttp.ClientSession, chat_id: int, query: str):
+    if not query:
+        await _send(session, chat_id, "Usage: `/play song name or url`")
+        return
+
+    st = state.get(chat_id)
+    st.radio_mode = False
+
+    if len(st.queue) >= config.MAX_QUEUE_SIZE:
+        await _send(session, chat_id, f"❌ Queue is full ({config.MAX_QUEUE_SIZE} tracks).")
+        return
+
+    await _send(session, chat_id, "🔍 Searching…")
+    try:
+        track = await get_track_info(query)
+    except Exception as e:
+        await _send(session, chat_id, f"❌ Could not find track: `{e}`")
+        return
+
+    st.queue.append(track)
+    asyncio.create_task(db.save_queue(chat_id, st.queue))
+
+    if len(st.queue) == 1:
+        try:
+            await pl.play_current(chat_id, first=True)
+            await _send(session, chat_id, f"▶️ Playing: `{track.get('title', 'Unknown')}`")
+        except NoActiveGroupCall:
+            if st.queue:
+                st.queue.pop()
+            await _send(session, chat_id, "❌ No active voice chat in this group. Start VC first, then /play again.")
+        except Exception as e:
+            if st.queue:
+                st.queue.pop()
+            await _send(session, chat_id, f"❌ Playback failed: `{e}`")
+    else:
+        await _send(
+            session,
+            chat_id,
+            f"📋 Queued #{len(st.queue)}: `{track.get('title', 'Unknown')}` ({fmt_duration(track.get('duration', 0))})",
+        )
+
+
+async def _handle_queue(session: aiohttp.ClientSession, chat_id: int):
+    q = state.get(chat_id).queue
+    if not q:
+        await _send(session, chat_id, "Queue is empty.")
+        return
+    lines = []
+    for i, t in enumerate(q[:20]):
+        icon = "▶️" if i == 0 else f"{i}."
+        lines.append(f"{icon} {t.get('title', 'Unknown')} `{fmt_duration(t.get('duration', 0))}`")
+    if len(q) > 20:
+        lines.append(f"…and {len(q) - 20} more")
+    await _send(session, chat_id, "\n".join(lines))
+
+
+async def _handle_np(session: aiohttp.ClientSession, chat_id: int):
+    st = state.get(chat_id)
+    if not st.current:
+        await _send(session, chat_id, "Nothing is playing.")
+        return
+    await pl.send_np_message(chat_id)
+
+
+async def _handle_skip(session: aiohttp.ClientSession, chat_id: int, user_id: int):
+    if config.ADMIN_ONLY_CMDS and not await _is_chat_admin(session, chat_id, user_id):
+        await _send(session, chat_id, "⛔ Only admins can use this command.")
+        return
+    st = state.get(chat_id)
+    if not st.current:
+        await _send(session, chat_id, "Nothing is playing.")
+        return
+    title = st.current.get("title", "Unknown")
+    await pl.skip(chat_id)
+    await _send(session, chat_id, f"⏭ Skipped: `{title}`")
+
+
+async def _handle_stop(session: aiohttp.ClientSession, chat_id: int, user_id: int):
+    if config.ADMIN_ONLY_CMDS and not await _is_chat_admin(session, chat_id, user_id):
+        await _send(session, chat_id, "⛔ Only admins can use this command.")
+        return
+    if pl.call_py is None:
+        state.clear(chat_id)
+        await db.clear_queue(chat_id)
+    else:
+        await pl.stop(chat_id)
+    await _send(session, chat_id, "⏹ Stopped and cleared queue.")
+
+
+async def _handle_pause(session: aiohttp.ClientSession, chat_id: int):
+    if pl.call_py is None:
+        await _send(session, chat_id, "❌ Voice userbot is not configured. Set SESSION_STRING and restart.")
+        return
+    st = state.get(chat_id)
+    if not st.current:
+        await _send(session, chat_id, "Nothing is playing.")
+        return
+    await pl.pause(chat_id)
+    await _send(session, chat_id, "⏸ Paused.")
+
+
+async def _handle_resume(session: aiohttp.ClientSession, chat_id: int):
+    if pl.call_py is None:
+        await _send(session, chat_id, "❌ Voice userbot is not configured. Set SESSION_STRING and restart.")
+        return
+    st = state.get(chat_id)
+    if not st.current:
+        await _send(session, chat_id, "Nothing is playing.")
+        return
+    await pl.resume(chat_id)
+    await _send(session, chat_id, "▶️ Resumed.")
+
+
+async def _handle_loop(session: aiohttp.ClientSession, chat_id: int):
+    st = state.get(chat_id)
+    st.loop = not st.loop
+    await db.set_setting(chat_id, "loop", int(st.loop))
+    if pl.call_py is not None:
+        await pl.refresh_np(chat_id)
+    await _send(session, chat_id, f"🔁 Loop mode: {'ON' if st.loop else 'OFF'}.")
+
+
+async def _handle_vol(session: aiohttp.ClientSession, chat_id: int, args: str):
+    if not args or not args.split()[0].lstrip('-').isdigit():
+        await _send(session, chat_id, f"Current volume: `{state.get(chat_id).volume}`. Usage: `/vol 0-200`")
+        return
+    vol = max(0, min(200, int(args.split()[0])))
+    st = state.get(chat_id)
+    st.volume = vol
+    await db.set_setting(chat_id, "volume", vol)
+    if pl.call_py is not None and st.current:
+        await pl.set_volume(chat_id, vol)
+    await _send(session, chat_id, f"🔊 Volume set to `{vol}`.")
+
+
 async def _handle_message(session: aiohttp.ClientSession, message: dict[str, Any]):
     chat = message.get("chat") or {}
     from_user = message.get("from") or {}
@@ -231,10 +401,30 @@ async def _handle_message(session: aiohttp.ClientSession, message: dict[str, Any
 
     if cmd == "/start":
         await _handle_start(session, chat_id, user_id)
+    elif cmd == "/help":
+        await _handle_help(session, chat_id)
     elif cmd == "/myid":
         await _send(session, chat_id, f"Your Telegram user ID is:\n`{user_id}`")
     elif cmd in ("/owner", "/ownerpanel"):
         await _handle_ownerpanel(session, chat_id, user_id)
+    elif cmd == "/play":
+        await _handle_play(session, chat_id, args)
+    elif cmd == "/queue":
+        await _handle_queue(session, chat_id)
+    elif cmd in ("/np", "/nowplaying"):
+        await _handle_np(session, chat_id)
+    elif cmd == "/skip":
+        await _handle_skip(session, chat_id, user_id)
+    elif cmd == "/stop":
+        await _handle_stop(session, chat_id, user_id)
+    elif cmd == "/pause":
+        await _handle_pause(session, chat_id)
+    elif cmd == "/resume":
+        await _handle_resume(session, chat_id)
+    elif cmd == "/loop":
+        await _handle_loop(session, chat_id)
+    elif cmd == "/vol":
+        await _handle_vol(session, chat_id, args)
     elif cmd == "/gensession":
         await _start_session_flow(session, chat_id, user_id, args)
     elif cmd == "/otp":
