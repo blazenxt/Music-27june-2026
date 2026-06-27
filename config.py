@@ -11,7 +11,7 @@ load_dotenv()
 API_ID         = int(os.environ["API_ID"])
 API_HASH       = os.environ["API_HASH"]
 BOT_TOKEN      = os.environ["BOT_TOKEN"]
-SESSION_STRING = os.environ["SESSION_STRING"]
+SESSION_STRING = os.environ["SESSION_STRING"].strip()
 
 # ── YouTube Cookies ───────────────────────────────────────────────────────────
 # See cookies/HOW_TO_GET_COOKIES.md

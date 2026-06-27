@@ -43,12 +43,20 @@ app = Client(
 )
 
 # PyTgCalls 2.x is currently more reliable with Telethon than Pyrogram.
-# SESSION_STRING must be generated with gen_session.py (Telethon StringSession).
-userbot = TelegramClient(
-    StringSession(config.SESSION_STRING),
-    config.API_ID,
-    config.API_HASH,
-)
+# SESSION_STRING must be generated with this repo's gen_session.py.
+def _make_userbot() -> TelegramClient:
+    try:
+        session = StringSession(config.SESSION_STRING)
+    except ValueError as e:
+        raise RuntimeError(
+            "Invalid SESSION_STRING. Generate a fresh Telethon StringSession with `python gen_session.py` "
+            "and paste the printed value into Railway Variables as SESSION_STRING. "
+            "Old Pyrogram session strings are not compatible with this deployment."
+        ) from e
+    return TelegramClient(session, config.API_ID, config.API_HASH)
+
+
+userbot = _make_userbot()
 
 call_py = PyTgCalls(userbot)
 
