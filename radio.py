@@ -1,12 +1,9 @@
 """
-radio.py — Spotify-first radio.
+radio.py — Genre radio using spotdl for Spotify playlists (no Premium needed).
 
 Priority:
-  1. If Spotify credentials set  → use curated Spotify playlist for genre
-  2. Fallback                    → YouTube playlist search (yt-dlp)
-
-Spotify radio is much better quality: real editorial playlists, accurate
-metadata, correct durations for smart YT matching.
+  1. Spotify curated playlist via spotdl  (best quality, real metadata)
+  2. YouTube search fallback              (works without spotdl)
 """
 
 import asyncio
@@ -15,18 +12,12 @@ import random
 from pathlib import Path
 
 import yt_dlp
-
-from config import (
-    RADIO_PREFER_SPOTIFY,
-    SPOTIFY_GENRE_PLAYLISTS,
-    YT_COOKIES_FILE,
-)
+from config import YT_COOKIES_FILE, RADIO_PREFER_SPOTIFY, SPOTIFY_GENRE_PLAYLISTS
 
 log = logging.getLogger(__name__)
 
 RADIO_BATCH = 20
 
-# YouTube fallback seeds (when Spotify not available)
 YT_GENRE_SEEDS: dict[str, list[str]] = {
     "lofi":       ["lofi hip hop radio beats to study", "lofi chill beats playlist"],
     "hiphop":     ["hip hop playlist 2024", "rap classics mix"],
@@ -44,35 +35,32 @@ YT_GENRE_SEEDS: dict[str, list[str]] = {
     "sleep":      ["sleep music playlist", "relaxing music for sleep"],
     "workout":    ["workout motivation music", "gym playlist 2024"],
     "reggae":     ["reggae playlist", "reggae classics mix"],
+    "bollywood":  ["bollywood hits playlist", "hindi songs mix 2024"],
+    "punjabi":    ["punjabi hits playlist", "punjabi songs mix 2024"],
 }
 
 AVAILABLE_GENRES = sorted(set(list(SPOTIFY_GENRE_PLAYLISTS.keys()) + list(YT_GENRE_SEEDS.keys())))
 
 
-# ── Spotify radio ─────────────────────────────────────────────────────────────
+# ── Spotify radio via spotdl ──────────────────────────────────────────────────
 
-def _spotify_radio(genre: str, limit: int = RADIO_BATCH) -> list[dict]:
-    """Fetch tracks from a curated Spotify genre playlist."""
-    from helpers import get_spotify_playlist_tracks, SPOTIFY_ENABLED
+def _spotdl_playlist(playlist_url: str, limit: int = RADIO_BATCH) -> list[dict]:
+    from helpers import resolve_spotify, SPOTIFY_ENABLED
     if not SPOTIFY_ENABLED:
         return []
-    playlist_id = SPOTIFY_GENRE_PLAYLISTS.get(genre.lower())
-    if not playlist_id:
-        return []
-    tracks = get_spotify_playlist_tracks(playlist_id, limit=limit)
+    tracks = resolve_spotify(playlist_url)
     random.shuffle(tracks)
-    log.info("Spotify radio: loaded %d tracks for genre '%s'", len(tracks), genre)
-    return tracks
+    return tracks[:limit]
 
 
-# ── YouTube fallback radio ────────────────────────────────────────────────────
+# ── YouTube fallback ──────────────────────────────────────────────────────────
 
 def _make_ydl_opts() -> dict:
     opts = {
-        "quiet":          True,
-        "no_warnings":    True,
-        "extract_flat":   "in_playlist",
-        "playlistend":    RADIO_BATCH,
+        "quiet": True,
+        "no_warnings": True,
+        "extract_flat": "in_playlist",
+        "playlistend": RADIO_BATCH,
         "default_search": "ytsearch1",
         "socket_timeout": 15,
         "http_headers": {
@@ -106,30 +94,30 @@ def _yt_radio(seed: str) -> list[dict]:
                 "webpage_url": e.get("url") or e.get("webpage_url", ""),
                 "_yt_query":   e.get("url") or e.get("webpage_url", ""),
             })
-    log.info("YT radio: loaded %d tracks for seed '%s'", len(tracks), seed)
     return tracks[:RADIO_BATCH]
 
 
 # ── Public API ────────────────────────────────────────────────────────────────
 
 async def get_radio_tracks(genre: str) -> tuple[str, list[dict], str]:
-    """
-    Returns (label, tracks, source) where source is 'spotify' or 'youtube'.
-    Tracks are ready to enqueue (url=None, resolved lazily on play).
-    """
+    """Returns (genre_label, tracks, source='spotify'|'youtube')"""
     genre = genre.lower().strip()
     loop  = asyncio.get_event_loop()
 
-    # Try Spotify first
-    if RADIO_PREFER_SPOTIFY and SPOTIFY_GENRE_PLAYLISTS.get(genre):
-        try:
-            from helpers import SPOTIFY_ENABLED
-            if SPOTIFY_ENABLED:
-                tracks = await loop.run_in_executor(None, _spotify_radio, genre)
+    # Try Spotify curated playlist via spotdl
+    if RADIO_PREFER_SPOTIFY:
+        playlist_url = SPOTIFY_GENRE_PLAYLISTS.get(genre)
+        if playlist_url:
+            # Convert bare ID to full URL if needed
+            if not playlist_url.startswith("http"):
+                playlist_url = f"https://open.spotify.com/playlist/{playlist_url}"
+            try:
+                tracks = await loop.run_in_executor(None, _spotdl_playlist, playlist_url)
                 if tracks:
+                    log.info("Spotify radio: %d tracks for '%s'", len(tracks), genre)
                     return genre, tracks, "spotify"
-        except Exception as e:
-            log.warning("Spotify radio failed, falling back to YT: %s", e)
+            except Exception as e:
+                log.warning("Spotify radio failed, using YT: %s", e)
 
     # YouTube fallback
     seeds = YT_GENRE_SEEDS.get(genre)
