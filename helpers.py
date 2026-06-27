@@ -54,6 +54,19 @@ except Exception as e:
 SPOTIFY_RE = re.compile(r"https?://open\.spotify\.com/(track|playlist|album|artist)/[A-Za-z0-9]+")
 
 
+def _normalise_query(query: str) -> str:
+    """Clean user input before passing it to yt-dlp.
+
+    Users often type `/play spotify:song name`. That is not a Spotify URL;
+    yt-dlp treats it as an unsupported URL scheme. Convert it to plain search.
+    Real Spotify URLs are still handled by spotdl.
+    """
+    query = (query or "").strip()
+    if query.lower().startswith("spotify:") and "open.spotify.com" not in query.lower():
+        query = query.split(":", 1)[1].strip()
+    return query
+
+
 # ── yt-dlp options ────────────────────────────────────────────────────────────
 
 def _make_ydl_opts(extra: dict = {}) -> dict:
@@ -64,6 +77,13 @@ def _make_ydl_opts(extra: dict = {}) -> dict:
         "extract_flat":   False,
         "default_search": "ytsearch1",
         "socket_timeout": 20,
+        "noplaylist": True,
+        "extractor_args": {
+            "youtube": {
+                # Helps on many hosts, but cookies may still be required by YouTube.
+                "player_client": ["android", "web"],
+            }
+        },
         "http_headers": {
             "User-Agent": (
                 "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
@@ -176,6 +196,10 @@ async def get_track_info(query: str) -> dict:
       Spotify URL → spotdl metadata → best YouTube match
       YouTube URL / text → yt-dlp with cookies
     """
+    query = _normalise_query(query)
+    if not query:
+        raise ValueError("Empty query. Send a song name, YouTube URL, or full Spotify URL.")
+
     if "spotify.com" in query and SPOTIFY_ENABLED:
         loop   = asyncio.get_event_loop()
         tracks = await loop.run_in_executor(None, resolve_spotify, query)

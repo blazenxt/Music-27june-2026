@@ -3,6 +3,8 @@ config.py — All bot settings.
 """
 
 import os
+import base64
+from pathlib import Path
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -16,6 +18,26 @@ SESSION_STRING = os.getenv("SESSION_STRING", "").strip()
 # ── YouTube Cookies ───────────────────────────────────────────────────────────
 # See cookies/HOW_TO_GET_COOKIES.md
 YT_COOKIES_FILE = os.getenv("YT_COOKIES_FILE", "cookies/youtube.txt")
+
+# Railway-friendly cookies support. Set either:
+#   YT_COOKIES_CONTENT = raw Netscape cookies.txt content
+#   YT_COOKIES_B64     = base64 encoded cookies.txt content
+def _write_youtube_cookies_from_env():
+    raw = os.getenv("YT_COOKIES_CONTENT", "").strip()
+    b64 = os.getenv("YT_COOKIES_B64", "").strip()
+    if not raw and not b64:
+        return
+    try:
+        content = base64.b64decode(b64).decode("utf-8") if b64 else raw.replace("\\n", "\n")
+        path = Path(YT_COOKIES_FILE)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(content, encoding="utf-8")
+    except Exception:
+        # Avoid printing cookie content by accident. yt-dlp will show a normal error if unusable.
+        pass
+
+
+_write_youtube_cookies_from_env()
 
 # ── Behaviour ─────────────────────────────────────────────────────────────────
 DEFAULT_VOLUME   = int(os.getenv("DEFAULT_VOLUME", "100"))
