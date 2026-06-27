@@ -3,6 +3,7 @@
 import asyncio
 import logging
 import logging.handlers
+import aiohttp
 from pathlib import Path
 
 from pyrogram import Client, filters
@@ -42,6 +43,7 @@ app = Client(
     api_id=config.API_ID,
     api_hash=config.API_HASH,
     bot_token=config.BOT_TOKEN,
+    in_memory=True,
 )
 
 # PyTgCalls 2.x is currently more reliable with Telethon than Pyrogram.
@@ -68,6 +70,25 @@ call_py = PyTgCalls(userbot) if userbot else None
 # ── Wire up ───────────────────────────────────────────────────────────────────
 
 pl.init(app, call_py)
+
+
+@app.on_message(filters.private & filters.text, group=-100)
+async def _early_private_commands(_, msg: Message):
+    """Emergency private handlers so /start and /myid always answer."""
+    text = (msg.text or "").strip().split()[0].split("@")[0].lower()
+    user_id = msg.from_user.id if msg.from_user else 0
+    log.info("Private message received text=%r from user_id=%s", msg.text, user_id)
+    if text in ("/start", "/ping"):
+        await msg.reply(
+            "✅ Bot is online.\n\n"
+            f"Your Telegram user ID: `{user_id}`\n"
+            "Use /ownerpanel if you are owner, or /myid to copy your ID.",
+            quote=True,
+        )
+    elif text == "/myid":
+        await msg.reply(f"Your Telegram user ID is:\n`{user_id}`", quote=True)
+
+
 commands.register(app)
 owner_tools.register(app)
 commands.register_callbacks(app)
@@ -118,9 +139,25 @@ async def _auto_resume():
             log.warning("Auto-resume failed for chat %d: %s", chat_id, e)
 
 
+# ── Bot API cleanup ───────────────────────────────────────────────────────────
+
+async def _delete_bot_api_webhook():
+    """Clear Bot API webhook/drop pending updates in case an old deployment set one."""
+    try:
+        url = f"https://api.telegram.org/bot{config.BOT_TOKEN}/deleteWebhook"
+        async with aiohttp.ClientSession() as session:
+            async with session.post(url, data={"drop_pending_updates": "true"}, timeout=10) as resp:
+                data = await resp.text()
+                log.info("deleteWebhook status=%s response=%s", resp.status, data[:200])
+    except Exception as e:
+        log.warning("deleteWebhook failed: %s", e)
+
+
 # ── Entry point ───────────────────────────────────────────────────────────────
 
 async def main():
+    await _delete_bot_api_webhook()
+
     log.info("Initialising database…")
     await db.init_db()
 
