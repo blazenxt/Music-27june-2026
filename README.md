@@ -1,75 +1,46 @@
-# 🎵 Telegram VC Music Bot v3
+# 🎵 Telegram VC Music Bot v4
 
-Stream music into Telegram voice chats with a persistent queue, lyrics, radio mode, and democratic skipping.
+Spotify-first music bot with YouTube cookies support.
 
-## What's new in v3
+## What's new in v4
 
-| Feature | v2 | v3 |
+| Feature | v3 | v4 |
 |---|---|---|
-| 📝 `/lyrics` | ❌ | ✅ auto-fetched, chunked for long songs |
-| 📻 `/radio <genre>` | ❌ | ✅ 16 genres, endless auto-refill |
-| 🗳️ `/voteskip` | ❌ | ✅ configurable threshold |
-| 📜 `/history` | ❌ | ✅ last 20 played per group |
-| 🗄️ SQLite persistence | ❌ | ✅ queue + settings survive restarts |
-| ♻️ Auto-resume on restart | ❌ | ✅ notifies groups to resume |
-| 🔁 Stale URL retry | ❌ | ✅ re-fetches expired yt-dlp URLs |
-| 📋 Rotating log file | ❌ | ✅ `logs/bot.log` (5 MB × 3) |
-| 📻 Radio auto-refill | ❌ | ✅ tops up when queue runs low |
-
----
-
-## File layout
-
-```
-music_bot_v3/
-├── bot.py          # entry point
-├── config.py       # all settings
-├── commands.py     # all /command handlers + callbacks
-├── player.py       # playback engine
-├── state.py        # in-memory per-chat state
-├── database.py     # SQLite persistence (aiosqlite)
-├── lyrics.py       # lyrics fetcher (lyrics.ovh + lrclib.net)
-├── radio.py        # genre radio seeding via yt-dlp
-├── voteskip.py     # vote-skip logic
-├── keyboards.py    # inline button layouts
-├── helpers.py      # yt-dlp, Spotify, admin check, formatting
-├── gen_session.py  # run once to get SESSION_STRING
-├── requirements.txt
-└── .env.example
-data/
-└── musicbot.db     # auto-created on first run
-logs/
-└── bot.log         # rotating log
-```
+| 🎵 `/radio` via Spotify playlists | ❌ YT only | ✅ Spotify editorial playlists |
+| 🎯 Smart Spotify→YT matching | ❌ title search only | ✅ duration-aware, picks closest match |
+| 🍪 YouTube cookies support | ❌ | ✅ fixes bot-detection errors |
+| 🎤 `/play spotify:artist/...` | ❌ | ✅ artist top tracks |
+| 🎨 Rich Spotify metadata | ❌ | ✅ artist, album, thumbnail from Spotify |
+| 📻 Spotify genre playlists | ❌ | ✅ 14 curated Spotify playlists |
 
 ---
 
 ## Setup
 
 ### 1. Install
-
 ```bash
 pip install -r requirements.txt
-# Optional Spotify support:
-pip install spotipy
 ```
+> Also requires ffmpeg: `sudo apt install ffmpeg`
 
-ffmpeg is required: `sudo apt install ffmpeg` / `brew install ffmpeg`
+### 2. Spotify credentials
+1. Go to https://developer.spotify.com/dashboard
+2. Create an app → copy **Client ID** and **Client Secret**
+3. Add to `.env`
 
-### 2. Configure
+### 3. YouTube cookies (fixes bot-detection)
+See `cookies/HOW_TO_GET_COOKIES.md` for full instructions. Short version:
+- Install "Get cookies.txt LOCALLY" browser extension
+- Log in to YouTube
+- Export → save as `cookies/youtube.txt`
 
+### 4. Configure
 ```bash
 cp .env.example .env
-# fill in API_ID, API_HASH, BOT_TOKEN, SESSION_STRING
+python gen_session.py   # generate SESSION_STRING once
 ```
 
-Generate your session string (once):
-```bash
-python gen_session.py
-```
-
-### 3. Run
-
+### 5. Run
 ```bash
 python bot.py
 ```
@@ -78,61 +49,46 @@ python bot.py
 
 ## Commands
 
-| Command | Description | Admin? |
-|---|---|---|
-| `/play <song/URL>` | Search & play, or add to queue | No |
-| `/radio <genre>` | Start endless genre radio | No |
-| `/lyrics [song]` | Fetch lyrics for current or named track | No |
-| `/history` | Show last 20 played tracks | No |
-| `/voteskip` | Vote to skip (majority needed) | No |
-| `/np` | Now playing + inline controls | No |
-| `/queue` | Show queue | No |
-| `/pause` / `/resume` | Pause / resume | No |
-| `/vol 0–200` | Set volume | No |
-| `/loop` | Toggle loop mode | No |
-| `/skip` | Skip (instant) | ✅ |
-| `/stop` | Stop & clear queue | ✅ |
+| Command | Description |
+|---|---|
+| `/play <song>` | YouTube search |
+| `/play <spotify track URL>` | Spotify track → YouTube stream |
+| `/play <spotify playlist URL>` | Queue full Spotify playlist |
+| `/play <spotify album URL>` | Queue full album |
+| `/play <spotify artist URL>` | Queue artist's top 10 tracks |
+| `/radio <genre>` | Endless Spotify editorial radio |
+| `/lyrics [song]` | Fetch lyrics |
+| `/history` | Last played tracks |
+| `/voteskip` | Vote to skip |
+| `/np` | Now playing + controls |
+| `/queue` | Show queue |
+| `/pause` / `/resume` / `/loop` | Playback control |
+| `/vol 0–200` | Set volume |
+| `/skip` | Skip _(admin)_ |
+| `/stop` | Stop & clear _(admin)_ |
 
 ---
 
-## Radio genres
+## Radio genres (Spotify playlists)
 
-`lofi` · `hiphop` · `pop` · `rock` · `electronic` · `jazz` · `classical` · `rnb` · `metal` · `country` · `reggae` · `kpop` · `anime` · `gaming` · `sleep` · `workout`
+`lofi` · `hiphop` · `pop` · `rock` · `electronic` · `jazz` · `classical` · `rnb` · `metal` · `country` · `kpop` · `anime` · `workout` · `sleep`
 
-Custom genres also work: `/radio synthwave`
-
----
-
-## Key config options (`config.py`)
-
-```python
-ADMIN_ONLY_CMDS  = True    # /skip and /stop require admin
-VOTESKIP_THRESHOLD = 0.5   # fraction of members to pass a vote-skip
-RADIO_AUTO_REFILL  = True  # add more tracks when queue runs low
-RADIO_REFILL_AT    = 3     # refill when fewer than this many tracks remain
-AUTO_RESUME        = True  # restore queues after restart
-HISTORY_LIMIT      = 20    # tracks shown in /history
-```
+Custom genres work too via YouTube fallback: `/radio bhangra`, `/radio phonk`
 
 ---
 
-## Systemd deployment
+## How Spotify → YouTube works
 
-```ini
-[Unit]
-Description=Telegram Music Bot v3
-After=network.target
-
-[Service]
-WorkingDirectory=/path/to/music_bot_v3
-ExecStart=/usr/bin/python3 bot.py
-Restart=always
-RestartSec=5
-
-[Install]
-WantedBy=multi-user.target
+```
+/play spotify link
+    ↓
+spotipy fetches: title, artist, album, duration_ms, thumbnail
+    ↓
+yt-dlp searches YouTube with: "{artist} - {title} official audio"
+    ↓
+Top 5 results compared by duration (picks closest match)
+    ↓
+Stream URL extracted with cookies → played in VC
 ```
 
-```bash
-sudo systemctl enable --now musicbot
-```
+Duration matching prevents getting live versions, covers, or wrong songs.
