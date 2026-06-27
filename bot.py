@@ -15,6 +15,7 @@ import config
 import player as pl
 import commands
 import owner_tools
+import bot_api_fallback
 import database as db
 from state import get as get_state
 
@@ -176,6 +177,11 @@ async def main():
 
     me = await app.get_me()
     log.info("✅ Bot running as @%s", me.username)
+
+    # Safety net: Bot API long polling for /start, /myid, /ownerpanel,
+    # /gensession and /restart. This fixes cases where Railway/Pyrogram
+    # starts but command updates do not reach the Pyrogram dispatcher.
+    asyncio.create_task(bot_api_fallback.run())
 
     await _auto_resume()
 
