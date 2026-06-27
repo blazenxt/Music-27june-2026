@@ -1,65 +1,52 @@
 """
-helpers.py — Audio resolution with Spotify-first approach + YouTube cookies.
+helpers.py — Audio resolution using spotdl (no Spotify Premium needed).
 
-Flow for any query:
-  Spotify URL  →  spotipy metadata  →  smart YouTube search  →  yt-dlp stream URL
-  YouTube URL  →  yt-dlp (with cookies)
-  Text query   →  yt-dlp search (with cookies)
+Flow:
+  Spotify URL  →  spotdl fetches metadata  →  smart YouTube duration-match  →  stream
+  YouTube URL  →  yt-dlp with cookies
+  Text search  →  yt-dlp with cookies
 
-Cookies fix:
-  - "Sign in to confirm you're not a bot" errors
-  - Age-restricted videos
-  - Some region-locked content
+Why spotdl?
+  - No API key needed, no Premium account needed
+  - Internally uses Spotify's public web scraping + YouTube Music matching
+  - Handles: track, playlist, album, artist, liked songs
 """
 
 import asyncio
 import logging
-import os
 import re
 from pathlib import Path
-from typing import Optional
 
 import yt_dlp
 
-from config import YT_COOKIES_FILE, SPOTIFY_CLIENT_ID, SPOTIFY_CLIENT_SECRET
+from config import YT_COOKIES_FILE
 
 log = logging.getLogger(__name__)
 
-# ── Spotify init ──────────────────────────────────────────────────────────────
+# ── spotdl init ───────────────────────────────────────────────────────────────
 
 try:
-    import spotipy
-    from spotipy.oauth2 import SpotifyClientCredentials
-    if SPOTIFY_CLIENT_ID and SPOTIFY_CLIENT_SECRET:
-        _sp = spotipy.Spotify(
-            auth_manager=SpotifyClientCredentials(
-                client_id=SPOTIFY_CLIENT_ID,
-                client_secret=SPOTIFY_CLIENT_SECRET,
-            )
-        )
-        SPOTIFY_ENABLED = True
-        log.info("Spotify: enabled")
-    else:
-        SPOTIFY_ENABLED = False
-        _sp = None
-        log.info("Spotify: disabled (no credentials)")
+    from spotdl import Spotdl
+    from spotdl.types.song import Song
+    _spotdl = Spotdl(
+        client_id="5f573c9620494bae87890c0f08a60293",   # spotdl public client id
+        client_secret="212476d9b0f3472eaa762d90b19b0ba8", # spotdl public secret
+    )
+    SPOTIFY_ENABLED = True
+    log.info("spotdl: ready (no Premium needed)")
 except ImportError:
     SPOTIFY_ENABLED = False
-    _sp = None
-    log.warning("Spotify: spotipy not installed — run: pip install spotipy")
+    _spotdl = None
+    log.warning("spotdl not installed — run: pip install spotdl")
 
 # ── Regex ─────────────────────────────────────────────────────────────────────
 
-SPOTIFY_TRACK_RE    = re.compile(r"spotify\.com/track/([A-Za-z0-9]+)")
-SPOTIFY_PLAYLIST_RE = re.compile(r"spotify\.com/playlist/([A-Za-z0-9]+)")
-SPOTIFY_ALBUM_RE    = re.compile(r"spotify\.com/album/([A-Za-z0-9]+)")
-SPOTIFY_ARTIST_RE   = re.compile(r"spotify\.com/artist/([A-Za-z0-9]+)")
+SPOTIFY_RE = re.compile(r"https?://open\.spotify\.com/(track|playlist|album|artist)/[A-Za-z0-9]+")
 
 
-# ── yt-dlp options (with cookies) ────────────────────────────────────────────
+# ── yt-dlp options ────────────────────────────────────────────────────────────
 
 def _make_ydl_opts(extra: dict = {}) -> dict:
-    """Build yt-dlp options, injecting cookies file if it exists."""
     opts = {
         "format":         "bestaudio/best",
         "quiet":          True,
@@ -67,7 +54,6 @@ def _make_ydl_opts(extra: dict = {}) -> dict:
         "extract_flat":   False,
         "default_search": "ytsearch1",
         "socket_timeout": 20,
-        # Spoof a real browser User-Agent
         "http_headers": {
             "User-Agent": (
                 "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
@@ -77,132 +63,48 @@ def _make_ydl_opts(extra: dict = {}) -> dict:
         },
         **extra,
     }
-    # Inject cookies if file exists
     cookie_path = Path(YT_COOKIES_FILE)
     if cookie_path.exists():
         opts["cookiefile"] = str(cookie_path)
-        log.debug("Using cookies from %s", cookie_path)
-    else:
-        log.debug("No cookies file at %s — YouTube may rate-limit", cookie_path)
     return opts
 
 
-# ── Spotify: metadata extraction ──────────────────────────────────────────────
+# ── spotdl: Spotify → track metadata ─────────────────────────────────────────
 
-def _sp_track_meta(track_id: str) -> dict:
-    """Return rich metadata dict for a Spotify track ID."""
-    t = _sp.track(track_id)
-    artists = ", ".join(a["name"] for a in t["artists"])
-    return {
-        "spotify_id":  track_id,
-        "title":       t["name"],
-        "artist":      artists,
-        "album":       t["album"]["name"],
-        "duration_ms": t["duration_ms"],
-        "duration":    t["duration_ms"] // 1000,
-        "thumbnail":   t["album"]["images"][0]["url"] if t["album"]["images"] else "",
-        "spotify_url": t["external_urls"].get("spotify", ""),
-        # Search query for YouTube
-        "_yt_query":   f"{artists} - {t['name']} official audio",
-    }
-
-
-def get_spotify_track(track_id: str) -> dict:
-    return _sp_track_meta(track_id)
-
-
-def get_spotify_playlist_tracks(playlist_id: str, limit: int = 50) -> list[dict]:
-    results = _sp.playlist_items(playlist_id, additional_types=("track",), limit=100)
-    tracks  = []
-    while results and len(tracks) < limit:
-        for item in results["items"]:
-            t = item.get("track")
-            if not t or not t.get("id"):
-                continue
-            artists = ", ".join(a["name"] for a in t["artists"])
-            tracks.append({
-                "spotify_id":  t["id"],
-                "title":       t["name"],
-                "artist":      artists,
-                "album":       t["album"]["name"],
-                "duration":    t["duration_ms"] // 1000,
-                "duration_ms": t["duration_ms"],
-                "thumbnail":   t["album"]["images"][0]["url"] if t["album"]["images"] else "",
-                "spotify_url": t["external_urls"].get("spotify", ""),
-                "_yt_query":   f"{artists} - {t['name']} official audio",
-                "url":         None,   # resolved lazily on play
-                "webpage_url": "",
-            })
-        results = _sp.next(results) if results and results.get("next") else None
-    return tracks[:limit]
-
-
-def get_spotify_album_tracks(album_id: str) -> list[dict]:
-    album   = _sp.album(album_id)
-    artist  = album["artists"][0]["name"]
-    thumb   = album["images"][0]["url"] if album["images"] else ""
-    results = _sp.album_tracks(album_id)
-    tracks  = []
-    for t in results["items"]:
-        all_artists = ", ".join(a["name"] for a in t["artists"])
-        tracks.append({
-            "spotify_id":  t["id"],
-            "title":       t["name"],
-            "artist":      all_artists,
-            "album":       album["name"],
-            "duration":    t["duration_ms"] // 1000,
-            "duration_ms": t["duration_ms"],
-            "thumbnail":   thumb,
-            "spotify_url": t["external_urls"].get("spotify", ""),
-            "_yt_query":   f"{all_artists} - {t['name']} official audio",
+def _spotdl_search(url: str) -> list[dict]:
+    """
+    Use spotdl to fetch Spotify metadata for any URL.
+    Returns list of track dicts with: title, artist, album, duration, thumbnail,
+    spotify_url, _yt_query, url=None
+    """
+    songs, _ = _spotdl.search([url])
+    result = []
+    for s in songs:
+        artists = ", ".join(s.artists) if s.artists else s.artist
+        result.append({
+            "title":       s.name,
+            "artist":      artists,
+            "album":       s.album_name or "",
+            "duration":    s.duration or 0,
+            "duration_ms": (s.duration or 0) * 1000,
+            "thumbnail":   s.cover_url or "",
+            "spotify_url": s.url or url,
+            "_yt_query":   f"{artists} - {s.name}",
             "url":         None,
             "webpage_url": "",
         })
-    return tracks
-
-
-def get_spotify_artist_top(artist_id: str, country: str = "IN") -> list[dict]:
-    data    = _sp.artist_top_tracks(artist_id, country=country)
-    artist  = _sp.artist(artist_id)["name"]
-    tracks  = []
-    for t in data["tracks"]:
-        tracks.append({
-            "spotify_id":  t["id"],
-            "title":       t["name"],
-            "artist":      artist,
-            "album":       t["album"]["name"],
-            "duration":    t["duration_ms"] // 1000,
-            "duration_ms": t["duration_ms"],
-            "thumbnail":   t["album"]["images"][0]["url"] if t["album"]["images"] else "",
-            "spotify_url": t["external_urls"].get("spotify", ""),
-            "_yt_query":   f"{artist} - {t['name']} official audio",
-            "url":         None,
-            "webpage_url": "",
-        })
-    return tracks
+    return result
 
 
 def resolve_spotify(url: str) -> list[dict]:
-    """
-    Parse any Spotify URL and return a list of track dicts.
-    Each dict has: title, artist, duration, thumbnail, spotify_url, _yt_query, url=None
-    """
-    if not SPOTIFY_ENABLED or not _sp:
+    """Public API — parse any Spotify URL and return track dicts."""
+    if not SPOTIFY_ENABLED or not _spotdl:
         return []
-    m = SPOTIFY_TRACK_RE.search(url)
-    if m:
-        meta = _sp_track_meta(m.group(1))
-        return [{**meta, "url": None, "webpage_url": ""}]
-    m = SPOTIFY_PLAYLIST_RE.search(url)
-    if m:
-        return get_spotify_playlist_tracks(m.group(1))
-    m = SPOTIFY_ALBUM_RE.search(url)
-    if m:
-        return get_spotify_album_tracks(m.group(1))
-    m = SPOTIFY_ARTIST_RE.search(url)
-    if m:
-        return get_spotify_artist_top(m.group(1))
-    return []
+    try:
+        return _spotdl_search(url)
+    except Exception as e:
+        log.error("spotdl failed for %s: %s", url, e)
+        return []
 
 
 # ── YouTube resolution ────────────────────────────────────────────────────────
@@ -215,59 +117,44 @@ def _ydl_extract(query: str) -> dict:
         return info
 
 
-def _ydl_search_best_match(yt_query: str, duration_ms: int) -> dict:
+def _ydl_best_match(yt_query: str, duration_s: float) -> dict:
     """
-    Search YouTube for yt_query, then pick the result whose duration is
-    closest to the Spotify track's duration (avoids getting a live version
-    or a cover by mistake).
+    Search YouTube, pick result closest in duration to target.
+    Avoids live versions, covers, remixes.
     """
     opts = _make_ydl_opts({
-        "extract_flat": "in_playlist",
-        "default_search": "ytsearch5",  # fetch 5 candidates
+        "extract_flat":   "in_playlist",
+        "default_search": "ytsearch5",
     })
     with yt_dlp.YoutubeDL(opts) as ydl:
         results = ydl.extract_info(yt_query, download=False)
-        entries = results.get("entries", [])
+        entries = results.get("entries") or []
 
     if not entries:
-        # Fallback to first result
         return _ydl_extract(yt_query)
 
-    # Score by duration proximity (within 10 s = perfect)
-    target_s = duration_ms / 1000
-    best      = None
-    best_diff = float("inf")
+    best, best_diff = None, float("inf")
     for e in entries:
         if not e:
             continue
-        diff = abs((e.get("duration") or 0) - target_s)
+        diff = abs((e.get("duration") or 0) - duration_s)
         if diff < best_diff:
             best_diff = diff
-            best      = e
+            best = e
 
-    if best is None:
-        return _ydl_extract(yt_query)
-
-    # Now fully extract the winner
-    yt_url = best.get("url") or best.get("webpage_url", "")
+    yt_url = (best or {}).get("url") or (best or {}).get("webpage_url") or yt_query
     return _ydl_extract(yt_url)
 
 
 async def resolve_yt_for_spotify(track: dict) -> dict:
-    """
-    Given a Spotify track dict (with _yt_query and duration_ms),
-    resolve the actual streamable YouTube URL and merge it in.
-    """
-    loop     = asyncio.get_event_loop()
-    yt_query = track.get("_yt_query") or track.get("title", "")
-    dur_ms   = track.get("duration_ms") or (track.get("duration", 0) * 1000)
+    """Resolve streamable YouTube URL for a Spotify track dict."""
+    loop      = asyncio.get_event_loop()
+    yt_query  = track.get("_yt_query") or track.get("title", "")
+    duration_s = track.get("duration") or track.get("duration_ms", 0) / 1000
 
-    info = await loop.run_in_executor(
-        None, _ydl_search_best_match, yt_query, dur_ms
-    )
+    info = await loop.run_in_executor(None, _ydl_best_match, yt_query, duration_s)
     track["url"]         = info["url"]
     track["webpage_url"] = info.get("webpage_url", "")
-    # Keep Spotify thumbnail if we have it, else use YouTube's
     if not track.get("thumbnail"):
         track["thumbnail"] = info.get("thumbnail", "")
     return track
@@ -276,12 +163,12 @@ async def resolve_yt_for_spotify(track: dict) -> dict:
 async def get_track_info(query: str) -> dict:
     """
     Universal resolver:
-      - Spotify URL  → spotipy metadata + smart YT match
-      - YouTube URL / text → yt-dlp with cookies
-    Returns: { title, artist, url, duration, thumbnail, webpage_url, spotify_url? }
+      Spotify URL → spotdl metadata → best YouTube match
+      YouTube URL / text → yt-dlp with cookies
     """
     if "spotify.com" in query and SPOTIFY_ENABLED:
-        tracks = resolve_spotify(query)
+        loop   = asyncio.get_event_loop()
+        tracks = await loop.run_in_executor(None, resolve_spotify, query)
         if tracks:
             return await resolve_yt_for_spotify(tracks[0])
 
