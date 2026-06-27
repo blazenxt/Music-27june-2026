@@ -35,14 +35,24 @@ def init(pyrogram_client, pytgcalls_client: PyTgCalls):
 async def _ensure_fresh_url(track: dict) -> dict:
     """
     Re-fetch the direct audio URL if missing or stale.
-    yt-dlp URLs expire after ~6 hours; the webpage_url / _query is permanent.
+    For Spotify tracks: uses smart YT duration-matching via resolve_yt_for_spotify.
+    For YouTube stubs: re-extracts via yt-dlp with cookies.
+    yt-dlp stream URLs expire after ~6h; permanent keys are _yt_query / webpage_url.
     """
     if track.get("url"):
-        return track                  # assume still fresh on first play
-    query = track.get("_query") or track.get("webpage_url") or track.get("title")
+        return track   # still fresh
+
+    # Spotify track — use smart matching
+    if track.get("spotify_id") or track.get("spotify_url") or track.get("_yt_query"):
+        from helpers import resolve_yt_for_spotify
+        log.info("Resolving Spotify→YT for: %s", track.get("title"))
+        return await resolve_yt_for_spotify(track)
+
+    # Plain YouTube stub
+    query = track.get("webpage_url") or track.get("title")
     if not query:
         raise ValueError(f"No resolvable query for track: {track.get('title')}")
-    log.info("Resolving URL for: %s", track.get("title"))
+    log.info("Re-fetching YT URL for: %s", track.get("title"))
     fresh = await get_track_info(query)
     track.update(fresh)
     return track
