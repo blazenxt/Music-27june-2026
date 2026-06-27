@@ -11,7 +11,7 @@ load_dotenv()
 API_ID         = int(os.environ["API_ID"])
 API_HASH       = os.environ["API_HASH"]
 BOT_TOKEN      = os.environ["BOT_TOKEN"]
-SESSION_STRING = os.environ["SESSION_STRING"].strip()
+SESSION_STRING = os.getenv("SESSION_STRING", "").strip()
 
 # ── YouTube Cookies ───────────────────────────────────────────────────────────
 # See cookies/HOW_TO_GET_COOKIES.md
@@ -22,6 +22,7 @@ DEFAULT_VOLUME   = int(os.getenv("DEFAULT_VOLUME", "100"))
 MAX_QUEUE_SIZE   = int(os.getenv("MAX_QUEUE_SIZE", "50"))
 ADMIN_ONLY_CMDS  = os.getenv("ADMIN_ONLY_CMDS", "true").lower() in ("1", "true", "yes", "on")
 LOG_CHANNEL_ID   = int(os.getenv("LOG_CHANNEL_ID", "0"))
+OWNER_ID         = int(os.getenv("OWNER_ID", "8708907310"))
 
 # ── Vote-skip ─────────────────────────────────────────────────────────────────
 VOTESKIP_THRESHOLD = 0.5

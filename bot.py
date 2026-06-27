@@ -12,6 +12,7 @@ from pytgcalls import PyTgCalls, filters as call_filters
 import config
 import player as pl
 import commands
+import owner_tools
 import database as db
 from state import get as get_state
 
@@ -43,30 +44,34 @@ app = Client(
 )
 
 # PyTgCalls 2.x is currently more reliable with Telethon than Pyrogram.
-# SESSION_STRING must be generated with this repo's gen_session.py.
-def _make_userbot() -> TelegramClient:
+# SESSION_STRING must be generated with gen_session.py or the owner-only /gensession flow.
+def _make_userbot() -> TelegramClient | None:
+    if not config.SESSION_STRING:
+        log.warning("SESSION_STRING is empty. Music playback is disabled until you set it and restart.")
+        return None
     try:
         session = StringSession(config.SESSION_STRING)
-    except ValueError as e:
-        raise RuntimeError(
-            "Invalid SESSION_STRING. Generate a fresh Telethon StringSession with `python gen_session.py` "
-            "and paste the printed value into Railway Variables as SESSION_STRING. "
-            "Old Pyrogram session strings are not compatible with this deployment."
-        ) from e
+    except ValueError:
+        log.error(
+            "Invalid SESSION_STRING. Bot commands will start, but music playback is disabled. "
+            "Generate a fresh Telethon StringSession with /gensession or `python gen_session.py`."
+        )
+        return None
     return TelegramClient(session, config.API_ID, config.API_HASH)
 
 
 userbot = _make_userbot()
-
-call_py = PyTgCalls(userbot)
+call_py = PyTgCalls(userbot) if userbot else None
 
 
 # ── Wire up ───────────────────────────────────────────────────────────────────
 
 pl.init(app, call_py)
 commands.register(app)
+owner_tools.register(app)
 commands.register_callbacks(app)
-call_py.on_update(call_filters.stream_end())(pl.on_stream_end)
+if call_py:
+    call_py.on_update(call_filters.stream_end())(pl.on_stream_end)
 
 
 # ── Auto-resume ───────────────────────────────────────────────────────────────
@@ -108,14 +113,18 @@ async def main():
     log.info("Initialising database…")
     await db.init_db()
 
-    log.info("Starting userbot…")
-    await userbot.start()
+    if userbot and call_py:
+        log.info("Starting userbot…")
+        await userbot.start()
+    else:
+        log.warning("Userbot/PyTgCalls not configured. Use /gensession as owner, set SESSION_STRING, then /restart.")
 
     log.info("Starting bot…")
     await app.start()
 
-    log.info("Starting PyTgCalls…")
-    await call_py.start()
+    if call_py:
+        log.info("Starting PyTgCalls…")
+        await call_py.start()
 
     me = await app.get_me()
     log.info("✅ Bot running as @%s", me.username)

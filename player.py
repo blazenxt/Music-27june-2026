@@ -144,6 +144,12 @@ async def play_current(chat_id: int, first: bool = False):
     st = state.get(chat_id)
     if not st.current:
         return
+    if call_py is None:
+        await _app.send_message(
+            chat_id,
+            "❌ Voice userbot is not configured. Owner must generate/set SESSION_STRING and restart."
+        )
+        return
 
     try:
         st.queue[0] = await _ensure_fresh_url(st.queue[0])

@@ -45,6 +45,25 @@ python gen_session.py
 
 Login with the Telegram user account that will join voice chats. Copy the printed session string into Railway as `SESSION_STRING`.
 
+
+## Owner-only controls
+
+Only the Telegram user ID in `OWNER_ID` can use these commands/buttons. Default:
+
+```env
+OWNER_ID=8708907310
+```
+
+Commands:
+
+- `/ownerpanel` — shows buttons for session generation and restart
+- `/gensession +919876543210` — generate the Telethon `SESSION_STRING` through bot chat
+- `/otp 12345` — submit login OTP
+- `/2fa your_password` — submit 2FA password if Telegram asks for it
+- `/restart` — restart the bot process
+
+After `/gensession` prints the string, paste it into Railway Variables as `SESSION_STRING`, then press restart or run `/restart`.
+
 ## Deploy on Railway
 
 1. Push this repo to GitHub.
