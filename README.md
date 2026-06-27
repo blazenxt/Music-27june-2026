@@ -1,94 +1,94 @@
-# 🎵 Telegram VC Music Bot v4
+# 🎵 Telegram VC Music Bot
 
-Spotify-first music bot with YouTube cookies support.
+Telegram group voice-chat music bot with YouTube search/URLs, Spotify links via `spotdl`, radio mode, lyrics, history, queue controls, vote-skip and inline player buttons.
 
-## What's new in v4
+## Features
 
-| Feature | v3 | v4 |
-|---|---|---|
-| 🎵 `/radio` via Spotify playlists | ❌ YT only | ✅ Spotify editorial playlists |
-| 🎯 Smart Spotify→YT matching | ❌ title search only | ✅ duration-aware, picks closest match |
-| 🍪 YouTube cookies support | ❌ | ✅ fixes bot-detection errors |
-| 🎤 `/play spotify:artist/...` | ❌ | ✅ artist top tracks |
-| 🎨 Rich Spotify metadata | ❌ | ✅ artist, album, thumbnail from Spotify |
-| 📻 Spotify genre playlists | ❌ | ✅ 14 curated Spotify playlists |
+- `/play <song or URL>` — YouTube search/URL or Spotify track/playlist/album/artist URL
+- `/radio <genre>` — genre radio with Spotify playlist preference and YouTube fallback
+- `/lyrics [song]` — lyrics lookup
+- `/history` — recently played tracks
+- `/voteskip` — democratic skip voting
+- `/np`, `/queue`, `/pause`, `/resume`, `/loop`, `/vol`, `/skip`, `/stop`
+- SQLite queue/history persistence
+- YouTube cookies support for bot-detection issues
 
----
+## Required environment variables
 
-## Setup
+Create these variables in Railway or a local `.env` file:
 
-### 1. Install
+```env
+API_ID=12345678
+API_HASH=your_api_hash
+BOT_TOKEN=your_bot_token
+SESSION_STRING=your_pyrogram_session_string
+```
+
+Optional:
+
+```env
+YT_COOKIES_FILE=cookies/youtube.txt
+LOG_CHANNEL_ID=0
+AUTO_RESUME=true
+ADMIN_ONLY_CMDS=true
+RADIO_PREFER_SPOTIFY=true
+```
+
+## Generate `SESSION_STRING`
+
+Run locally, not on Railway. This generates a **Telethon StringSession** for the voice userbot:
+
 ```bash
 pip install -r requirements.txt
-```
-> Also requires ffmpeg: `sudo apt install ffmpeg`
-
-### 2. Spotify credentials
-1. Go to https://developer.spotify.com/dashboard
-2. Create an app → copy **Client ID** and **Client Secret**
-3. Add to `.env`
-
-### 3. YouTube cookies (fixes bot-detection)
-See `cookies/HOW_TO_GET_COOKIES.md` for full instructions. Short version:
-- Install "Get cookies.txt LOCALLY" browser extension
-- Log in to YouTube
-- Export → save as `cookies/youtube.txt`
-
-### 4. Configure
-```bash
-cp .env.example .env
-python gen_session.py   # generate SESSION_STRING once
+python gen_session.py
 ```
 
-### 5. Run
+Login with the Telegram user account that will join voice chats. Copy the printed session string into Railway as `SESSION_STRING`.
+
+## Deploy on Railway
+
+1. Push this repo to GitHub.
+2. In Railway, create **New Project → Deploy from GitHub repo**.
+3. Add the required environment variables above.
+4. Railway will use `nixpacks.toml` to install Python and `ffmpeg`.
+5. Use the worker/start command:
+
 ```bash
 python bot.py
 ```
 
----
+This repo includes both `Procfile` and `nixpacks.toml` for Railway deployment.
 
-## Commands
+## Local run
 
-| Command | Description |
-|---|---|
-| `/play <song>` | YouTube search |
-| `/play <spotify track URL>` | Spotify track → YouTube stream |
-| `/play <spotify playlist URL>` | Queue full Spotify playlist |
-| `/play <spotify album URL>` | Queue full album |
-| `/play <spotify artist URL>` | Queue artist's top 10 tracks |
-| `/radio <genre>` | Endless Spotify editorial radio |
-| `/lyrics [song]` | Fetch lyrics |
-| `/history` | Last played tracks |
-| `/voteskip` | Vote to skip |
-| `/np` | Now playing + controls |
-| `/queue` | Show queue |
-| `/pause` / `/resume` / `/loop` | Playback control |
-| `/vol 0–200` | Set volume |
-| `/skip` | Skip _(admin)_ |
-| `/stop` | Stop & clear _(admin)_ |
-
----
-
-## Radio genres (Spotify playlists)
-
-`lofi` · `hiphop` · `pop` · `rock` · `electronic` · `jazz` · `classical` · `rnb` · `metal` · `country` · `kpop` · `anime` · `workout` · `sleep`
-
-Custom genres work too via YouTube fallback: `/radio bhangra`, `/radio phonk`
-
----
-
-## How Spotify → YouTube works
-
-```
-/play spotify link
-    ↓
-spotipy fetches: title, artist, album, duration_ms, thumbnail
-    ↓
-yt-dlp searches YouTube with: "{artist} - {title} official audio"
-    ↓
-Top 5 results compared by duration (picks closest match)
-    ↓
-Stream URL extracted with cookies → played in VC
+```bash
+cp .env.example .env
+pip install -r requirements.txt
+python gen_session.py  # only once, to get SESSION_STRING
+python bot.py
 ```
 
-Duration matching prevents getting live versions, covers, or wrong songs.
+You also need `ffmpeg` installed locally:
+
+```bash
+sudo apt update && sudo apt install -y ffmpeg
+```
+
+## YouTube cookies
+
+If YouTube returns “Sign in to confirm you're not a bot”, export cookies and save them as:
+
+```txt
+cookies/youtube.txt
+```
+
+See `cookies/HOW_TO_GET_COOKIES.md`.
+
+Real cookie files are ignored by git.
+
+## Notes
+
+- The bot account handles commands.
+- The userbot session joins and streams into voice chats. Generate `SESSION_STRING` with this repo's `gen_session.py`; older Pyrogram session strings are not compatible because playback uses Telethon for voice calls.
+- Start a group voice chat before using `/play`.
+- Spotify playback is resolved to YouTube audio; Spotify Premium is not required.

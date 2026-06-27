@@ -18,18 +18,18 @@ SESSION_STRING = os.environ["SESSION_STRING"]
 YT_COOKIES_FILE = os.getenv("YT_COOKIES_FILE", "cookies/youtube.txt")
 
 # ── Behaviour ─────────────────────────────────────────────────────────────────
-DEFAULT_VOLUME   = 100
-MAX_QUEUE_SIZE   = 50
-ADMIN_ONLY_CMDS  = True
+DEFAULT_VOLUME   = int(os.getenv("DEFAULT_VOLUME", "100"))
+MAX_QUEUE_SIZE   = int(os.getenv("MAX_QUEUE_SIZE", "50"))
+ADMIN_ONLY_CMDS  = os.getenv("ADMIN_ONLY_CMDS", "true").lower() in ("1", "true", "yes", "on")
 LOG_CHANNEL_ID   = int(os.getenv("LOG_CHANNEL_ID", "0"))
 
 # ── Vote-skip ─────────────────────────────────────────────────────────────────
 VOTESKIP_THRESHOLD = 0.5
 
 # ── Radio ─────────────────────────────────────────────────────────────────────
-RADIO_AUTO_REFILL    = True
-RADIO_REFILL_AT      = 3
-RADIO_PREFER_SPOTIFY = True
+RADIO_AUTO_REFILL    = os.getenv("RADIO_AUTO_REFILL", "true").lower() in ("1", "true", "yes", "on")
+RADIO_REFILL_AT      = int(os.getenv("RADIO_REFILL_AT", "3"))
+RADIO_PREFER_SPOTIFY = os.getenv("RADIO_PREFER_SPOTIFY", "true").lower() in ("1", "true", "yes", "on")
 
 # Spotify curated playlist IDs for each genre (public playlists, no login needed)
 SPOTIFY_GENRE_PLAYLISTS: dict[str, str] = {
@@ -52,5 +52,5 @@ SPOTIFY_GENRE_PLAYLISTS: dict[str, str] = {
 }
 
 # ── Persistence ───────────────────────────────────────────────────────────────
-AUTO_RESUME   = True
-HISTORY_LIMIT = 20
+AUTO_RESUME   = os.getenv("AUTO_RESUME", "true").lower() in ("1", "true", "yes", "on")
+HISTORY_LIMIT = int(os.getenv("HISTORY_LIMIT", "20"))

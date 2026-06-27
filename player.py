@@ -1,15 +1,16 @@
 """
-player.py — Core playback engine (v3).
-Adds: DB persistence, history logging, retry on stale URL,
-radio auto-refill, vote-skip reset on track change.
+player.py — Core playback engine.
+
+Compatible with py-tgcalls 2.x. Handles playback, queue advancement,
+now-playing messages, history persistence, radio refill and vote-skip reset.
 """
 
 import asyncio
 import logging
 
-from pytgcalls import PyTgCalls, idle
-from pytgcalls.types import AudioPiped
-from pytgcalls.exceptions import NoActiveGroupCall, AlreadyJoinedError
+from pytgcalls import PyTgCalls
+from pytgcalls.types import GroupCallConfig, MediaStream
+from pytgcalls.exceptions import NoActiveGroupCall, NotInCallError
 
 import state
 import database as db
@@ -20,13 +21,13 @@ from config import RADIO_AUTO_REFILL, RADIO_REFILL_AT
 
 log = logging.getLogger(__name__)
 
-call_py: PyTgCalls = None
+call_py: PyTgCalls | None = None
 _app = None
 
 
 def init(pyrogram_client, pytgcalls_client: PyTgCalls):
     global _app, call_py
-    _app    = pyrogram_client
+    _app = pyrogram_client
     call_py = pytgcalls_client
 
 
@@ -34,25 +35,24 @@ def init(pyrogram_client, pytgcalls_client: PyTgCalls):
 
 async def _ensure_fresh_url(track: dict) -> dict:
     """
-    Re-fetch the direct audio URL if missing or stale.
-    For Spotify tracks: uses smart YT duration-matching via resolve_yt_for_spotify.
-    For YouTube stubs: re-extracts via yt-dlp with cookies.
-    yt-dlp stream URLs expire after ~6h; permanent keys are _yt_query / webpage_url.
+    Make sure a track has a streamable URL.
+
+    yt-dlp stream URLs can expire. Saved queues keep stable identifiers like
+    _yt_query/webpage_url so tracks can be resolved again after restart.
     """
     if track.get("url"):
-        return track   # still fresh
+        return track
 
-    # Spotify track — use smart matching
     if track.get("spotify_id") or track.get("spotify_url") or track.get("_yt_query"):
         from helpers import resolve_yt_for_spotify
-        log.info("Resolving Spotify→YT for: %s", track.get("title"))
+        log.info("Resolving track to YouTube: %s", track.get("title"))
         return await resolve_yt_for_spotify(track)
 
-    # Plain YouTube stub
     query = track.get("webpage_url") or track.get("title")
     if not query:
         raise ValueError(f"No resolvable query for track: {track.get('title')}")
-    log.info("Re-fetching YT URL for: %s", track.get("title"))
+
+    log.info("Re-fetching YouTube URL for: %s", track.get("title"))
     fresh = await get_track_info(query)
     track.update(fresh)
     return track
@@ -64,13 +64,15 @@ def _np_text(st: state.ChatState) -> str:
     track = st.current
     if not track:
         return "Nothing playing."
-    dur     = track.get("duration", 0)
+
+    dur = track.get("duration", 0)
     elapsed = st.elapsed
-    bar     = progress_bar(elapsed, dur)
-    radio   = " 📻" if st.radio_mode else ""
-    loop    = " 🔁" if st.loop else ""
-    lines   = [
-        f"🎵 **{track['title']}**{radio}{loop}",
+    bar = progress_bar(elapsed, dur)
+    radio = " 📻" if st.radio_mode else ""
+    loop = " 🔁" if st.loop else ""
+
+    lines = [
+        f"🎵 **{track.get('title', 'Unknown')}**{radio}{loop}",
         f"`{bar}` {fmt_duration(elapsed)} / {fmt_duration(dur)}",
         f"Vol: {st.volume}",
     ]
@@ -80,19 +82,24 @@ def _np_text(st: state.ChatState) -> str:
 
 
 async def send_np_message(chat_id: int):
-    st   = state.get(chat_id)
+    st = state.get(chat_id)
     text = _np_text(st)
-    kb   = player_keyboard(paused=st.paused, loop=st.loop)
+    kb = player_keyboard(paused=st.paused, loop=st.loop)
     try:
         if st.np_message_id:
             await _app.edit_message_text(
-                chat_id, st.np_message_id, text,
-                reply_markup=kb, disable_web_page_preview=True,
+                chat_id,
+                st.np_message_id,
+                text,
+                reply_markup=kb,
+                disable_web_page_preview=True,
             )
         else:
             msg = await _app.send_message(
-                chat_id, text,
-                reply_markup=kb, disable_web_page_preview=True,
+                chat_id,
+                text,
+                reply_markup=kb,
+                disable_web_page_preview=True,
             )
             st.np_message_id = msg.id
     except Exception as e:
@@ -108,18 +115,24 @@ async def refresh_np(chat_id: int):
 async def _maybe_refill_radio(chat_id: int):
     if not RADIO_AUTO_REFILL:
         return
+
     st = state.get(chat_id)
     if not st.radio_mode or len(st.queue) > RADIO_REFILL_AT:
         return
+
     from radio import get_radio_tracks
     log.info("Radio refill for chat %d (genre: %s)", chat_id, st.radio_genre)
     try:
-        _, new_tracks = await get_radio_tracks(st.radio_genre)
-        # Don't re-add tracks already in queue
-        existing = {t.get("webpage_url") for t in st.queue if t.get("webpage_url")}
+        _, new_tracks, _ = await get_radio_tracks(st.radio_genre)
+        existing = {
+            t.get("webpage_url") or t.get("_yt_query") or t.get("title")
+            for t in st.queue
+        }
         for t in new_tracks:
-            if t.get("webpage_url") not in existing:
+            key = t.get("webpage_url") or t.get("_yt_query") or t.get("title")
+            if key not in existing:
                 st.queue.append(t)
+                existing.add(key)
         await db.save_queue(chat_id, st.queue)
     except Exception as e:
         log.warning("Radio refill failed: %s", e)
@@ -132,44 +145,43 @@ async def play_current(chat_id: int, first: bool = False):
     if not st.current:
         return
 
-    # Ensure we have a streamable URL
     try:
         st.queue[0] = await _ensure_fresh_url(st.queue[0])
     except Exception as e:
         log.error("URL resolution failed: %s", e)
-        await _app.send_message(chat_id, f"⚠️ Skipping **{st.current.get('title')}** — could not load audio.")
+        await _app.send_message(
+            chat_id,
+            f"⚠️ Skipping **{st.current.get('title', 'Unknown')}** — could not load audio.",
+        )
         await skip(chat_id)
         return
 
     url = st.current["url"]
     try:
-        if first:
-            await call_py.join_group_call(chat_id, AudioPiped(url))
-        else:
-            await call_py.change_stream(chat_id, AudioPiped(url))
+        # In py-tgcalls 2.x, play() both joins and changes an existing stream.
+        # auto_start=False keeps the old behaviour: user must start VC first.
+        await call_py.play(
+            chat_id,
+            MediaStream(url),
+            GroupCallConfig(auto_start=False),
+        )
         await call_py.change_volume_call(chat_id, st.volume)
         st.mark_started()
-        # Log to history
-        asyncio.ensure_future(db.push_history(chat_id, st.current))
-        # Reset vote-skip for this new track
+
+        asyncio.create_task(db.push_history(chat_id, st.current))
         voteskip.reset(chat_id)
-        # Persist queue
-        asyncio.ensure_future(db.save_queue(chat_id, st.queue))
-        # Delete old NP message, send fresh one
+        asyncio.create_task(db.save_queue(chat_id, st.queue))
+
         if st.np_message_id:
             try:
                 await _app.delete_messages(chat_id, st.np_message_id)
             except Exception:
                 pass
             st.np_message_id = None
-        await send_np_message(chat_id)
-        # Maybe refill radio queue
-        asyncio.ensure_future(_maybe_refill_radio(chat_id))
 
-    except AlreadyJoinedError:
-        await call_py.change_stream(chat_id, AudioPiped(url))
-        st.mark_started()
         await send_np_message(chat_id)
+        asyncio.create_task(_maybe_refill_radio(chat_id))
+
     except NoActiveGroupCall:
         raise
     except Exception as e:
@@ -181,10 +193,12 @@ async def skip(chat_id: int):
     st = state.get(chat_id)
     if not st.queue:
         return False
+
     if st.loop:
         st.queue.append(st.queue.pop(0))
     else:
         st.queue.pop(0)
+
     voteskip.reset(chat_id)
     if st.queue:
         await play_current(chat_id)
@@ -197,15 +211,17 @@ async def stop(chat_id: int):
     st = state.get(chat_id)
     st.queue.clear()
     try:
-        await call_py.leave_group_call(chat_id)
+        await call_py.leave_call(chat_id)
     except Exception:
         pass
+
     if st.np_message_id:
         try:
             await _app.edit_message_text(chat_id, st.np_message_id, "⏹ Playback stopped.")
         except Exception:
             pass
         st.np_message_id = None
+
     await db.clear_queue(chat_id)
     state.clear(chat_id)
 
@@ -214,7 +230,7 @@ async def pause(chat_id: int):
     st = state.get(chat_id)
     if st.paused:
         return
-    await call_py.pause_stream(chat_id)
+    await call_py.pause(chat_id)
     st.mark_paused()
     await refresh_np(chat_id)
 
@@ -223,14 +239,14 @@ async def resume(chat_id: int):
     st = state.get(chat_id)
     if not st.paused:
         return
-    await call_py.resume_stream(chat_id)
+    await call_py.resume(chat_id)
     st.mark_resumed()
     await refresh_np(chat_id)
 
 
 async def set_volume(chat_id: int, vol: int):
     vol = max(0, min(200, vol))
-    st  = state.get(chat_id)
+    st = state.get(chat_id)
     st.volume = vol
     await call_py.change_volume_call(chat_id, vol)
     await db.set_setting(chat_id, "volume", vol)
@@ -238,7 +254,7 @@ async def set_volume(chat_id: int, vol: int):
 
 
 async def toggle_loop(chat_id: int):
-    st      = state.get(chat_id)
+    st = state.get(chat_id)
     st.loop = not st.loop
     await db.set_setting(chat_id, "loop", int(st.loop))
     await refresh_np(chat_id)
@@ -249,11 +265,12 @@ async def toggle_loop(chat_id: int):
 
 async def on_stream_end(_, update):
     chat_id = update.chat_id
-    st      = state.get(chat_id)
+    st = state.get(chat_id)
     if not st.queue:
         state.clear(chat_id)
         await db.clear_queue(chat_id)
         return
+
     st.advance()
     if st.queue:
         try:
@@ -263,7 +280,7 @@ async def on_stream_end(_, update):
             await skip(chat_id)
     else:
         try:
-            await call_py.leave_group_call(chat_id)
+            await call_py.leave_call(chat_id)
         except Exception:
             pass
         await db.clear_queue(chat_id)

@@ -15,6 +15,7 @@ Why spotdl?
 import asyncio
 import logging
 import re
+import shutil
 from pathlib import Path
 
 import yt_dlp
@@ -27,17 +28,26 @@ log = logging.getLogger(__name__)
 
 try:
     from spotdl import Spotdl
-    from spotdl.types.song import Song
+
+    ffmpeg_path = shutil.which("ffmpeg")
+    if not ffmpeg_path:
+        raise RuntimeError("ffmpeg is not installed or not in PATH")
+
     _spotdl = Spotdl(
         client_id="5f573c9620494bae87890c0f08a60293",   # spotdl public client id
         client_secret="212476d9b0f3472eaa762d90b19b0ba8", # spotdl public secret
+        downloader_settings={"ffmpeg": ffmpeg_path},
     )
     SPOTIFY_ENABLED = True
     log.info("spotdl: ready (no Premium needed)")
 except ImportError:
     SPOTIFY_ENABLED = False
     _spotdl = None
-    log.warning("spotdl not installed — run: pip install spotdl")
+    log.warning("spotdl not installed — Spotify links disabled. Run: pip install spotdl")
+except Exception as e:
+    SPOTIFY_ENABLED = False
+    _spotdl = None
+    log.warning("spotdl disabled: %s", e)
 
 # ── Regex ─────────────────────────────────────────────────────────────────────
 

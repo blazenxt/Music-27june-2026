@@ -1,6 +1,4 @@
-"""
-bot.py — Entry point (v3). Adds DB init, auto-resume, structured logging.
-"""
+"""Telegram VC music bot entry point."""
 
 import asyncio
 import logging
@@ -8,7 +6,9 @@ import logging.handlers
 from pathlib import Path
 
 from pyrogram import Client
-from pytgcalls import PyTgCalls, idle
+from telethon import TelegramClient
+from telethon.sessions import StringSession
+from pytgcalls import PyTgCalls, filters as call_filters
 import config
 import player as pl
 import commands
@@ -42,11 +42,12 @@ app = Client(
     bot_token=config.BOT_TOKEN,
 )
 
-userbot = Client(
-    "userbot",
-    api_id=config.API_ID,
-    api_hash=config.API_HASH,
-    session_string=config.SESSION_STRING,
+# PyTgCalls 2.x is currently more reliable with Telethon than Pyrogram.
+# SESSION_STRING must be generated with gen_session.py (Telethon StringSession).
+userbot = TelegramClient(
+    StringSession(config.SESSION_STRING),
+    config.API_ID,
+    config.API_HASH,
 )
 
 call_py = PyTgCalls(userbot)
@@ -57,7 +58,7 @@ call_py = PyTgCalls(userbot)
 pl.init(app, call_py)
 commands.register(app)
 commands.register_callbacks(app)
-call_py.on_stream_end()(pl.on_stream_end)
+call_py.on_update(call_filters.stream_end())(pl.on_stream_end)
 
 
 # ── Auto-resume ───────────────────────────────────────────────────────────────

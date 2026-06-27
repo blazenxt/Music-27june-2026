@@ -1,0 +1,25 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.venv/
+venv/
+
+# Runtime/session data
+.env
+*.session
+*.session-journal
+logs/
+data/
+
+# YouTube cookies (keep docs, never commit real cookies)
+cookies/*.txt
+!cookies/HOW_TO_GET_COOKIES.md
+
+# Local backups/editor files
+*.bak
+.DS_Store

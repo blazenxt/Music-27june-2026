@@ -79,7 +79,7 @@ async def save_queue(chat_id: int, tracks: list[dict]):
                     t.get("duration", 0),
                     t.get("thumbnail", ""),
                     t.get("webpage_url", ""),
-                    t.get("_query", ""),
+                    t.get("_yt_query") or t.get("_query", ""),
                 ),
             )
         await db.commit()
@@ -100,7 +100,7 @@ async def load_queue(chat_id: int) -> list[dict]:
             "duration":    r["duration"],
             "thumbnail":   r["thumbnail"],
             "webpage_url": r["webpage_url"],
-            "_query":      r["query"],
+            "_yt_query":   r["query"],
         }
         for r in rows
     ]
