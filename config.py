@@ -54,6 +54,7 @@ VOTESKIP_THRESHOLD = 0.5
 RADIO_AUTO_REFILL    = os.getenv("RADIO_AUTO_REFILL", "true").lower() in ("1", "true", "yes", "on")
 RADIO_REFILL_AT      = int(os.getenv("RADIO_REFILL_AT", "3"))
 RADIO_PREFER_SPOTIFY = os.getenv("RADIO_PREFER_SPOTIFY", "true").lower() in ("1", "true", "yes", "on")
+PREFER_SPOTIFY_SEARCH = os.getenv("PREFER_SPOTIFY_SEARCH", "true").lower() in ("1", "true", "yes", "on")
 
 # Spotify curated playlist IDs for each genre (public playlists, no login needed)
 SPOTIFY_GENRE_PLAYLISTS: dict[str, str] = {

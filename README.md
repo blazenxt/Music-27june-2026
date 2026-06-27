@@ -93,6 +93,29 @@ You also need `ffmpeg` installed locally:
 sudo apt update && sudo apt install -y ffmpeg
 ```
 
+
+## Spotify-first playback mode
+
+By default, normal `/play song name` searches Spotify first using `spotdl` for better metadata and matching, then resolves the selected track to a playable stream. YouTube is used only as the stream provider/fallback because Telegram voice chats need a direct audio stream and Spotify does not expose public direct stream URLs.
+
+```env
+PREFER_SPOTIFY_SEARCH=true
+```
+
+Use full Spotify links for best results:
+
+```txt
+/play https://open.spotify.com/track/...
+/play https://open.spotify.com/playlist/...
+```
+
+Plain searches also prefer Spotify now:
+
+```txt
+/play bairan
+/play siya ram
+```
+
 ## YouTube cookies
 
 If YouTube returns “Sign in to confirm you're not a bot”, export cookies and save them as:

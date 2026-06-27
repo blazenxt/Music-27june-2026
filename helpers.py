@@ -20,7 +20,7 @@ from pathlib import Path
 
 import yt_dlp
 
-from config import YT_COOKIES_FILE
+from config import YT_COOKIES_FILE, PREFER_SPOTIFY_SEARCH
 
 log = logging.getLogger(__name__)
 
@@ -192,20 +192,45 @@ async def resolve_yt_for_spotify(track: dict) -> dict:
 
 async def get_track_info(query: str) -> dict:
     """
-    Universal resolver:
-      Spotify URL → spotdl metadata → best YouTube match
-      YouTube URL / text → yt-dlp with cookies
+    Universal resolver with Spotify-first behaviour:
+      1. Full Spotify URL -> Spotify metadata via spotdl -> YouTube stream URL
+      2. Plain song search -> Spotify search via spotdl first -> YouTube stream URL
+      3. If Spotify search fails/no result -> direct YouTube search fallback
+      4. YouTube/other URLs -> yt-dlp directly
+
+    Note: Spotify does not expose a direct public audio stream for Telegram VC.
+    So Spotify is used as the primary catalogue/metadata/search source, while
+    YouTube is used as the stream provider/fallback.
     """
     query = _normalise_query(query)
     if not query:
         raise ValueError("Empty query. Send a song name, YouTube URL, or full Spotify URL.")
 
-    if "spotify.com" in query and SPOTIFY_ENABLED:
-        loop   = asyncio.get_event_loop()
+    lower = query.lower()
+    is_spotify_url = "open.spotify.com" in lower
+    looks_like_url = "://" in query or lower.startswith(("www.", "youtu.be/", "youtube.com/"))
+
+    # 1) Full Spotify links: always Spotify-first.
+    if is_spotify_url:
+        if not SPOTIFY_ENABLED:
+            raise ValueError("Spotify support is disabled because spotdl/ffmpeg is unavailable.")
+        loop = asyncio.get_event_loop()
+        tracks = await loop.run_in_executor(None, resolve_spotify, query)
+        if not tracks:
+            raise ValueError("Could not load Spotify link. Check the URL or try a song name.")
+        return await resolve_yt_for_spotify(tracks[0])
+
+    # 2) Plain text searches: Spotify catalogue first, YouTube only as fallback.
+    if PREFER_SPOTIFY_SEARCH and SPOTIFY_ENABLED and not looks_like_url:
+        loop = asyncio.get_event_loop()
         tracks = await loop.run_in_executor(None, resolve_spotify, query)
         if tracks:
-            return await resolve_yt_for_spotify(tracks[0])
+            try:
+                return await resolve_yt_for_spotify(tracks[0])
+            except Exception as e:
+                log.warning("Spotify-first resolution failed for %r, falling back to YouTube: %s", query, e)
 
+    # 3) YouTube / generic fallback.
     loop = asyncio.get_event_loop()
     info = await loop.run_in_executor(None, _ydl_extract, query)
     return {
@@ -217,7 +242,6 @@ async def get_track_info(query: str) -> dict:
         "webpage_url": info.get("webpage_url", ""),
         "spotify_url": "",
     }
-
 
 # ── Formatting ────────────────────────────────────────────────────────────────
 
