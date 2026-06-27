@@ -7,7 +7,7 @@ radio auto-refill, vote-skip reset on track change.
 import asyncio
 import logging
 
-from pytgcalls import GroupCallFile as PyTgCalls
+from pytgcalls import PyTgCalls, idle
 from pytgcalls.types import AudioPiped
 from pytgcalls.exceptions import NoActiveGroupCall, AlreadyJoinedError
 
