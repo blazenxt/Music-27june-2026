@@ -5,7 +5,8 @@ import logging
 import logging.handlers
 from pathlib import Path
 
-from pyrogram import Client
+from pyrogram import Client, filters
+from pyrogram.types import Message
 from telethon import TelegramClient
 from telethon.sessions import StringSession
 from pytgcalls import PyTgCalls, filters as call_filters
@@ -70,6 +71,16 @@ pl.init(app, call_py)
 commands.register(app)
 owner_tools.register(app)
 commands.register_callbacks(app)
+
+
+@app.on_message(filters.all, group=99)
+async def _diagnostic_message_logger(_, msg: Message):
+    if msg.text and msg.text.startswith("/"):
+        user_id = msg.from_user.id if msg.from_user else None
+        chat_id = msg.chat.id if msg.chat else None
+        log.info("Received command text=%r from user_id=%s chat_id=%s", msg.text, user_id, chat_id)
+
+
 if call_py:
     call_py.on_update(call_filters.stream_end())(pl.on_stream_end)
 
