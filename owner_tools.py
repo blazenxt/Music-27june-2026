@@ -11,7 +11,10 @@ from pyrogram.types import (
     CallbackQuery,
     InlineKeyboardButton,
     InlineKeyboardMarkup,
+    KeyboardButton,
     Message,
+    ReplyKeyboardMarkup,
+    ReplyKeyboardRemove,
 )
 from telethon import TelegramClient
 from telethon.errors import (
@@ -24,6 +27,8 @@ from telethon.errors import (
 from telethon.sessions import StringSession
 
 import config
+
+_verified_runtime_owners: set[int] = set()
 
 
 @dataclass
@@ -38,7 +43,11 @@ _flows: dict[int, SessionFlow] = {}
 
 
 def _is_owner(user_id: Optional[int]) -> bool:
-    return bool(user_id and user_id == config.OWNER_ID)
+    return bool(user_id and (user_id == config.OWNER_ID or user_id in _verified_runtime_owners))
+
+
+def _norm_phone(phone: str) -> str:
+    return "".join(ch for ch in (phone or "") if ch.isdigit())
 
 
 def _owner_keyboard() -> InlineKeyboardMarkup:
@@ -69,6 +78,65 @@ async def _restart_soon(delay: float = 1.5):
 
 
 def register(app: Client):
+    @app.on_message(filters.command("start"))
+    async def start_cmd(_, msg: Message):
+        user_id = msg.from_user.id if msg.from_user else 0
+        if _is_owner(user_id):
+            await msg.reply(
+                "✅ **Bot is running!**\n\n"
+                "You are verified as owner. Use the panel below.",
+                reply_markup=_owner_keyboard(),
+                quote=True,
+            )
+        else:
+            await msg.reply(
+                "✅ **Music bot is online.**\n\n"
+                f"Your Telegram user ID: `{user_id}`\n\n"
+                "Owner tools are locked. If you are the owner, use `/myid` and set `OWNER_ID` in Railway, "
+                "or use `/verifyowner` and share the owner phone contact.",
+                quote=True,
+            )
+
+    @app.on_message(filters.command("myid"))
+    async def myid_cmd(_, msg: Message):
+        user_id = msg.from_user.id if msg.from_user else 0
+        await msg.reply(f"Your Telegram user ID is:\n`{user_id}`", quote=True)
+
+    @app.on_message(filters.command("verifyowner"))
+    async def verify_owner_cmd(_, msg: Message):
+        await msg.reply(
+            "To verify owner access, tap the button below and share the Telegram contact for the owner number.\n\n"
+            "This is only needed if `OWNER_ID` is not your actual Telegram user ID.",
+            reply_markup=ReplyKeyboardMarkup(
+                [[KeyboardButton("📱 Share owner contact", request_contact=True)]],
+                resize_keyboard=True,
+                one_time_keyboard=True,
+            ),
+            quote=True,
+        )
+
+    @app.on_message(filters.contact)
+    async def owner_contact(_, msg: Message):
+        if not msg.from_user or not msg.contact:
+            return
+        owner_phone = _norm_phone(str(getattr(config, "OWNER_PHONE", "8708907310")))
+        sent_phone = _norm_phone(msg.contact.phone_number)
+        # Telegram sets contact.user_id only when user shares their own Telegram contact.
+        is_self_contact = msg.contact.user_id == msg.from_user.id
+        if is_self_contact and sent_phone.endswith(owner_phone):
+            _verified_runtime_owners.add(msg.from_user.id)
+            await msg.reply(
+                "✅ Owner verified for this running container.\n\nUse /ownerpanel now.",
+                reply_markup=ReplyKeyboardRemove(),
+                quote=True,
+            )
+        else:
+            await msg.reply(
+                "❌ Owner verification failed. Share your own Telegram contact linked to the owner phone number.",
+                reply_markup=ReplyKeyboardRemove(),
+                quote=True,
+            )
+
     @app.on_message(filters.command(["owner", "ownerpanel"]))
     async def owner_panel(_, msg: Message):
         if not _is_owner(msg.from_user.id if msg.from_user else None):
